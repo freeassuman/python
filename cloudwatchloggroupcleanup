@@ -1,0 +1,34 @@
+import boto3
+import pprint
+import traceback
+
+def lambda_handler(event, context):
+    try:
+        region_name= 'eu-west-1'
+        log_grp_list = [
+        "/aws/containerinsights/eks-democluster/prometheus",
+        "/aws/lambda/DemoLambda",
+        ]
+        client = boto3.client('logs', region_name=region_name)
+        for i in log_grp_list:
+            log_stream_list = []
+            paginator_describe_log_streams = client.get_paginator('describe_log_streams')
+            response_describe_log_streams = paginator_describe_log_streams.paginate(
+                logGroupName= i,
+            )
+            for page_up in response_describe_log_streams:
+                for item in page_up['logStreams']:
+                    log_stream_list.append(item['logStreamName'])
+           
+            for u in log_stream_list:
+                response_delete_log_stream = client.delete_log_stream(
+                    logGroupName= i,
+                    logStreamName= u
+                )
+                if response_delete_log_stream['ResponseMetadata']['HTTPStatusCode'] == 200:
+                    print("'{}' log stream deleted for {} log group!".format(u,i))
+                else:
+                    print(response_delete_log_stream)
+    except Exception as err:
+        trace_err = traceback.format_exc()
+        return "Error occurred while performing the action : {}".format(trace_err)  
