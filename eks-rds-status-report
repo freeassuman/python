@@ -1,0 +1,82 @@
+import json
+import boto3
+
+client_eks =boto3.client('eks')
+client_rds = boto3.client('rds')
+client_sns = boto3.client('sns')
+
+def lambda_handler(event, context):
+    try:
+        paginator_list_clusters = client_eks.get_paginator('list_clusters')
+        paginator_list_nodegroups = client_eks.get_paginator('list_nodegroups')
+        paginator_describe_db_instances = client_rds.get_paginator('describe_db_instances')
+        from datetime import date
+        today = date.today()
+        todaysdate = today.strftime("%d-%b-%Y")
+        
+        sub = 'AWS Service Status Report on ' + todaysdate
+        
+        body = '---------------------------------------------------------------------------------'
+        body += '\nThe details of Production EKS nodegroups and RDS databases :'
+        body += '\n---------------------------------------------------------------------------------'
+        
+        body += '\n\nThe EKS nodegroups status.'
+        body += '\n---------------------------------------\n'
+        
+        cluster_list = []
+        response_list_clusters = paginator_list_clusters.paginate()
+        for cluster_page in response_list_clusters:
+            cluster_list.extend(cluster_page['clusters'])
+        for clus in cluster_list:
+            response_list_nodegroups = paginator_list_nodegroups.paginate(
+                clusterName= clus,
+            )
+            # body += '{} :\n\n'.format(clus)
+            for ng_page in response_list_nodegroups:
+                for ng in ng_page['nodegroups']:
+                    response_describe_nodegroup = client_eks.describe_nodegroup(
+                        clusterName=clus,
+                        nodegroupName=ng
+                    )
+                    if 'scalingConfig' in response_describe_nodegroup['nodegroup']:
+                        if 'desiredSize' in response_describe_nodegroup['nodegroup']['scalingConfig']:
+                            body += 'Nodegroup          : {}            Size : {}\n'.format(ng, str(response_describe_nodegroup['nodegroup']['scalingConfig']['desiredSize']))
+        
+        body += '\nThe RDS status\n'
+        body += '---------------------------------------\n'
+        
+        response_describe_db_instances = paginator_describe_db_instances.paginate()
+        for rds_page in response_describe_db_instances:
+            for rdsins in rds_page['DBInstances']:
+                if 'DBInstanceIdentifier' in rdsins and 'DBInstanceStatus' in rdsins:
+                    #body += '{}                     :                       {}\n'.format(rdsins['DBInstanceIdentifier'], rdsins['DBInstanceStatus'])
+                    dbNameLength = len(rdsins['DBInstanceIdentifier'])
+                    dbName = rdsins['DBInstanceIdentifier']
+                    padding = 35 - dbNameLength 
+                    dbNameWithPadding = dbName + " " * padding
+                    dbInsStatus = rdsins['DBInstanceStatus']
+                    finalLine = dbNameWithPadding + dbInsStatus + '\n'
+                    print (finalLine)
+                    body += finalLine 
+                    
+                    
+                    
+        # print(body)
+        body += '\n\n -------------------------------The end of Report------------------------------- .\n\n\n'
+        response_publish = client_sns.publish(
+            TopicArn='arn:aws:sns:eu-west-1:1234567890:AWSServiceStatusReport',
+            Message= body,
+            Subject= sub,
+            # MessageStructure='string',
+            # MessageAttributes={
+            #     'string': {
+            #         'DataType': 'string',
+            #         'StringValue': 'string',
+            #         'BinaryValue': b'bytes'
+            #     }
+            # }
+        )
+        print("email sent")
+
+    except Exception as err:
+        return "Error occurred while performing the action : {}".format(err)
