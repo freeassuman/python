@@ -1,0 +1,30 @@
+import boto3
+import pprint
+import traceback
+
+def lambda_handler(event, context):
+    try:
+        user_pool_id = 'eu-west-1_abcdefg'
+        region_name= 'eu-west-1'
+        client = boto3.client('cognito-idp', region_name=region_name)
+        user_list = []
+        paginator_list_users = client.get_paginator('list_users')
+        response_list_users = paginator_list_users.paginate(
+            UserPoolId= user_pool_id,
+        )
+        for page_up in response_list_users:
+            for item in page_up['Users']:
+                user_list.append(item['Username'])
+    
+        for u in user_list:
+            response_admin_delete_user = client.admin_delete_user(
+                UserPoolId= user_pool_id,
+                Username= u
+            )
+            if response_admin_delete_user['ResponseMetadata']['HTTPStatusCode'] == 200:
+                print("'{}' user deleted from {} user pool!".format(u,user_pool_id))
+            else:
+                print(response_admin_delete_user)
+    except Exception as err:
+        trace_err = traceback.format_exc()
+        return "Error occurred while performing the action : {}".format(trace_err)
