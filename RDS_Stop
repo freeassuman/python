@@ -1,0 +1,37 @@
+import sys
+import boto3
+import json
+from datetime import datetime
+
+tag_key = 'stop_flag'
+tag_value = 'PROD'
+
+def lambda_handler(event, context):
+    rds_client = boto3.client(service_name="rds",region_name='eu-west-1')
+    response_describe_db_instances = rds_client.describe_db_instances()
+    for db_instance in response_describe_db_instances['DBInstances']:
+        for tag in db_instance['TagList']:
+            if tag['Key'] == tag_key and tag['Value'] == tag_value:
+                db_instance_identifier = db_instance['DBInstanceIdentifier']
+                if db_instance['DBInstanceStatus'].lower() == 'available':
+                    print(f'[{datetime.now().strftime("%d-%b-%Y %H:%M:%S")}] : Stopping the RDS instance start — {db_instance_identifier}')
+                    rds_response = rds_client.stop_db_instance(DBInstanceIdentifier = db_instance_identifier)
+                    response_code = rds_response['ResponseMetadata']['HTTPStatusCode']
+                    if response_code == 200 :
+                        print(f'[{datetime.now().strftime("%d-%b-%Y %H:%M:%S")}] : Stopping the RDS instance complete- {db_instance_identifier}')
+                    else:
+                        print(f'[{datetime.now().strftime("%d-%b-%Y %H:%M:%S")}] : error in Stopping instance - {db_instance_identifier}')
+
+    response_describe_db_clusters = rds_client.describe_db_clusters()
+    for db_cluster in response_describe_db_clusters['DBClusters']:
+        for tag in db_cluster['TagList']:
+            if tag['Key'] == tag_key and tag['Value'] == tag_value :
+                db_cluster_identifier = db_cluster['DBClusterIdentifier']
+                if db_cluster['Status'].lower() == 'available':
+                    print(f'[{datetime.now().strftime("%d-%b-%Y %H:%M:%S")}] : Stopping the RDS cluster start — {db_cluster_identifier}')
+                    rds_response = rds_client.stop_db_cluster(DBClusterIdentifier = db_cluster_identifier)
+                    response_code = rds_response['ResponseMetadata']['HTTPStatusCode']
+                    if response_code == 200 :
+                        print(f'[{datetime.now().strftime("%d-%b-%Y %H:%M:%S")}] : Stopping the RDS cluster complete- {db_cluster_identifier}')
+                    else:
+                        print(f'[{datetime.now().strftime("%d-%b-%Y %H:%M:%S")}] : error in Stopping cluster - {db_cluster_identifier}')
