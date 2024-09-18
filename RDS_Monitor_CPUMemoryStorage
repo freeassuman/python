@@ -1,0 +1,88 @@
+import boto3
+import datetime
+ 
+# Initialize boto3 clients
+cloudwatch = boto3.client('cloudwatch')
+sns = boto3.client('sns')
+ 
+# Configuration
+RDS_INSTANCE_IDENTIFIER = 'name-of-oracle-ods'
+THRESHOLD_CPU_UTILIZATION = 70  # CPU utilization threshold
+THRESHOLD_FREE_MEMORY = 5000 # Free memory threshold in MB
+THRESHOLD_FREE_STORAGE_SPACE = 10000  # Free storage space threshold in MB (5 GB)
+SNS_TOPIC_ARN = 'arn:aws:sns:eu-west-1:0123456789:AWSServiceStatusReport'  
+AWS_REGION = 'eu-west-1b'  
+
+#PREDEFINED_MESSAGE_CPU = """ This email is being sent to test a Lambda function. The Lambda function will monitor the CPU utilization of the database. It will run every six hour to check if the CPU utilization exceeds a specified threshold. If the condition is met, it will trigger an email notification. """
+#PREDEFINED_MESSAGE_MEMORY = """ This email is being sent to test a Lambda function. The Lambda function will monitor the Freeable Memory of the database. It will run every six hour to check if the Freeable Memory is lower than the specified threshold. If the condition is met, it will trigger an email notification. """
+
+def get_metric_data(metric_name, statistic, period=300):
+    end_time = datetime.datetime.utcnow()
+    start_time = end_time - datetime.timedelta(minutes=10)
+    
+    response = cloudwatch.get_metric_statistics(
+        Namespace='AWS/RDS',
+        MetricName=metric_name,
+        Dimensions=[
+            {
+                'Name': 'DBInstanceIdentifier',
+                'Value': RDS_INSTANCE_IDENTIFIER
+            },
+        ],
+        StartTime=start_time,
+        EndTime=end_time,
+        Period=period,
+        Statistics=[statistic]
+    )
+    
+    data_points = response['Datapoints']
+    if not data_points:
+        return None
+    return data_points[-1][statistic]
+ 
+def send_sns_notification(subject, message):
+    response = sns.publish(
+        TopicArn=SNS_TOPIC_ARN,
+        Subject=subject,
+        Message=message
+    )
+    return response
+ 
+
+def lambda_handler(event, context):
+    cpu_utilization = get_metric_data('CPUUtilization', 'Average')
+    free_memory = get_metric_data('FreeableMemory', 'Average')
+    free_storage_space = get_metric_data('FreeStorageSpace', 'Average')
+    
+    if cpu_utilization is None or free_memory is None or free_storage_space is None:
+        print("No data available")
+        return
+    
+    cpu_utilization_rounded = round(cpu_utilization, 2)
+    free_memory_mb = free_memory / (1024 * 1024)  # Convert bytes to MB
+    free_memory_mb_rounded = round(free_memory_mb, 2)
+    free_storage_space_mb = free_storage_space / (1024 * 1024)  # Convert bytes to MB
+    free_storage_space_mb_rounded = round(free_storage_space_mb, 2)
+ 
+    print(f"CPU Utilization: {cpu_utilization_rounded}%")
+    print(f"Free Memory: {free_memory_mb_rounded} MB")
+    print(f"Free Storage Space: {free_storage_space_mb_rounded} MB")
+    
+    if cpu_utilization_rounded > THRESHOLD_CPU_UTILIZATION:
+        subject = "High CPU Utilization Alert RDS"
+        message = f"The CPU utilization of RDS is {cpu_utilization_rounded}% which is above the threshold of {THRESHOLD_CPU_UTILIZATION}%."
+        send_sns_notification(subject, message)
+    
+    if free_memory_mb_rounded < THRESHOLD_FREE_MEMORY:
+        subject = "Low Free Memory Alert RDS"
+        message = f"The free memory of RDS is {free_memory_mb_rounded} MB which is below the threshold of {THRESHOLD_FREE_MEMORY} MB."
+        send_sns_notification(subject, message)
+    
+    if free_storage_space_mb_rounded < THRESHOLD_FREE_STORAGE_SPACE:
+        subject = "Low Free Storage Space Alert RDS"
+        message = f"The free storage space of RDS is {free_storage_space_mb_rounded} MB which is below the threshold of {THRESHOLD_FREE_STORAGE_SPACE} MB."
+        send_sns_notification(subject, message)
+ 
+# Test the function
+if __name__ == "__main__":
+    lambda_handler(None, None)
