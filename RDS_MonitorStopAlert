@@ -1,0 +1,52 @@
+import boto3
+ 
+# Initialize boto3 clients
+rds = boto3.client('rds')
+sns = boto3.client('sns')
+ 
+# Configuration
+RDS_INSTANCES = ['mysql-instance-1-eu-west-1a','oracle-rds1','oracle-rds2']
+SNS_TOPIC_ARN = 'arn:aws:sns:eu-west-1:1234567890:AWSServiceStatusReport'  # Your SNS topic ARN
+ 
+# A simple cache to track the last status of each RDS instance
+last_status = {}
+ 
+def check_rds_status(instance_identifier):
+    try:
+        response = rds.describe_db_instances(DBInstanceIdentifier=instance_identifier)
+        status = response['DBInstances'][0]['DBInstanceStatus']
+        return status
+    except Exception as e:
+        print(f"Error checking status for {instance_identifier}: {e}")
+        return None
+ 
+def send_sns_alert(instance_identifier, status):
+    subject = f"RDS Instance Alert: {instance_identifier} status changed to {status}"
+    message = f"The RDS instance {instance_identifier} status has changed to {status}."
+    
+    response = sns.publish(
+        TopicArn=SNS_TOPIC_ARN,
+        Subject=subject,
+        Message=message
+    )
+    return response
+ 
+def lambda_handler(event, context):
+    for instance in RDS_INSTANCES:
+        current_status = check_rds_status(instance)
+        
+        if current_status:
+            if instance in last_status and last_status[instance] == 'available' and current_status != 'available':
+                send_sns_alert(instance, current_status)
+            
+            # Update the status cache
+            last_status[instance] = current_status
+ 
+    return "Status check complete"
+ 
+# Test the function locally
+if __name__ == "__main__":
+    lambda_handler(None, None) 
+    
+#cloudwatch event rule
+#Schedule: setup a rate expression (eg: `rate(5 minutes)`) to check every 5 minutes and add this lambda function as target
