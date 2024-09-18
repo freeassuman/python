@@ -1,0 +1,42 @@
+import sys
+import boto3
+import json
+from datetime import datetime
+ 
+def lambda_handler(event, context):
+    # Define the source and destination bucket names
+    source_bucket = 'testbucket'
+    destination_bucket = 'testbucket2'
+ 
+    # Initialize the S3 client
+    s3 = boto3.client('s3')
+ 
+    # List objects in the source bucket
+    objects = s3.list_objects_v2(Bucket=source_bucket, Prefix='/folder/location/filepath/')['Contents']
+ 
+    # Define the tag key-value pair to filter objects
+    tag_key = 'keynamehere'
+    tag_value = 'keyvaluehere'
+ 
+    # # Iterate through objects, filter by tag, and copy to the destination bucket
+    for obj in objects:
+        # print(obj)
+        object_tags = s3.get_object_tagging(Bucket=source_bucket, Key=obj['Key'])['TagSet']
+        # print(object_tags)
+    #     # Check if the object has the desired tag
+        for tag in object_tags:
+            if tag['Key'] == tag_key and tag['Value'] == tag_value:
+                copy_source = {'Bucket': source_bucket, 'Key': obj['Key']}
+                destination_key = obj['Key']  # You can modify the destination key as needed
+                s3.copy_object(CopySource=copy_source, Bucket=destination_bucket, Key=destination_key)
+                print("{} object copied to {}!\n".format(obj['Key'], destination_bucket))
+                response_delete_object = s3.delete_object(
+                    Bucket=source_bucket,
+                    Key= obj['Key'],
+                )
+                print("{} object deleted from {}!\n".format(obj['Key'], source_bucket))
+ 
+    return {
+        'statusCode': 200,
+        'body': 'Objects copied successfully.'
+    }
