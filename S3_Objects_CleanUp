@@ -1,0 +1,31 @@
+import boto3
+import pprint
+import traceback
+
+def lambda_handler(event, context):
+    try:
+        bucket_list = [
+            'test-bucket'
+            ]
+        region_name= 'eu-west-2'
+        client = boto3.client('s3', region_name=region_name)
+        for b in bucket_list:
+            file_list = []
+            paginator_list_objects_v2 = client.get_paginator('list_objects_v2')
+            response_list_objects_v2 = paginator_list_objects_v2.paginate(
+                Bucket= b,
+            )
+            for page_up in response_list_objects_v2:
+                for item in page_up['Contents']:
+                    if not item['Key'].endswith("/"):
+                        response_delete_object = client.delete_object(
+                            Bucket= b,
+                            Key= item['Key'],
+                        )
+                        if response_delete_object['ResponseMetadata']['HTTPStatusCode'] == 200 or response_delete_object['ResponseMetadata']['HTTPStatusCode'] == 204:
+                            print("'{}' object deleted from {} bucket!".format(item['Key'],b))
+                        else:
+                            print(response_delete_object)
+    except Exception as err:
+        trace_err = traceback.format_exc()
+        return "Error occurred while performing the action : {}".format(trace_err)  
