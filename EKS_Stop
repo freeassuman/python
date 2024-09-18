@@ -1,0 +1,15 @@
+import boto3
+
+client = boto3.client('eks')
+
+def lambda_handler(event, context):
+
+    response_update_nodegroup_config = client.update_nodegroup_config(
+        clusterName='eks-clustername',
+        nodegroupName='ng-nodegroupname',
+        
+        scalingConfig={
+            'desiredSize': 0
+        },
+    )
+    print("Desired size modified to 0")
