@@ -1,0 +1,151 @@
+import json
+import boto3
+import datetime
+ 
+# Initialize boto3 clients
+cloudwatch = boto3.client('cloudwatch')
+rds = boto3.client('rds')
+client_eks =boto3.client('eks')
+sns = boto3.client('sns')
+
+ 
+# Configuration
+RDS_INSTANCES = ['mysql-instance-1-eu-west-1a','rds-oracle']
+SNS_TOPIC_ARN = 'arn:aws:sns:eu-west-1:1234567890:AWSServiceStatusReport'  # Your SNS topic ARN
+
+
+
+line_break = """----------------------------------"""
+line_break_2 = """---------------------------------------------------------------------------------"""
+line_break_3 = """---------------------------------------"""
+line_break_4 = """------------------------"""
+xx = """-"""
+ 
+def get_metric_data(db_instance_identifier, metric_name, statistic, period=300):
+    end_time = datetime.datetime.utcnow()
+    start_time = end_time - datetime.timedelta(minutes=10)
+    
+    response = cloudwatch.get_metric_statistics(
+        Namespace='AWS/RDS',
+        MetricName=metric_name,
+        Dimensions=[
+            {
+                'Name': 'DBInstanceIdentifier',
+                'Value': db_instance_identifier
+            },
+        ],
+        StartTime=start_time,
+        EndTime=end_time,
+        Period=period,
+        Statistics=[statistic]
+    )
+    
+    data_points = response['Datapoints']
+    if not data_points:
+        return None
+    return data_points[-1][statistic]
+ 
+def get_rds_status(db_instance_identifier):
+    response = rds.describe_db_instances(DBInstanceIdentifier=db_instance_identifier)
+    status = response['DBInstances'][0]['DBInstanceStatus']
+    return status
+ 
+def send_sns_message(subject, message):
+    response = sns.publish(
+        TopicArn=SNS_TOPIC_ARN,
+        Subject=subject,
+        Message=message
+    )
+    return response
+ 
+def lambda_handler(event, context):
+    today = datetime.datetime.utcnow().strftime('%d-%m-%Y')
+    subject = f"PROD Environment Health - {today}"
+    
+    body = f"{line_break_2}\nThe details of RDS databases and PROD EKS nodegroups:\n{line_break_2}\n\n➡  DB Health Parameters\n{line_break}\n"
+    for instance in RDS_INSTANCES:
+        cpu_utilization = get_metric_data(instance, 'CPUUtilization', 'Average')
+        free_memory = get_metric_data(instance, 'FreeableMemory', 'Average')
+        cpu_utilization = round(cpu_utilization, 2) if cpu_utilization else 'N/A'
+        free_memory_mb = round(free_memory / (1024 * 1024), 2) if free_memory else 'N/A'
+        if instance ==  'mysql-instance-1-eu-west-1a':
+            free_storage_sos = get_metric_data(instance, 'FreeLocalStorage', 'Average')
+            free_storage_space_sos_gb = round(free_storage_sos / (1024 * 1024 * 1024), 2) if free_storage_sos else 'N/A'
+            body += f"   • {instance}:\n"
+            body += f"        Free storage - {free_storage_space_sos_gb} GB\n"
+            body += f"        Cpu utilization - {cpu_utilization} %\n"
+            body += f"        Free memory - {free_memory_mb} MB\n\n"
+            
+        else:
+            free_storage_space = get_metric_data(instance, 'FreeStorageSpace', 'Average')
+            free_storage_space_gb = round(free_storage_space / (1024 * 1024 * 1024), 2) if free_storage_space else 'N/A'
+            
+            body += f"   • {instance}:\n"
+            body += f"        Free storage - {free_storage_space_gb} GB\n"
+            body += f"        Cpu utilization - {cpu_utilization} %\n"
+            body += f"        Free memory - {free_memory_mb} MB\n\n"
+        
+        
+        
+        #cpu_utilization = round(cpu_utilization, 2) if cpu_utilization else 'N/A'
+        #free_memory_mb = round(free_memory / (1024 * 1024), 2) if free_memory else 'N/A'
+        
+            #print(free_storage_space_sos_gb)
+        #body += f"   • {instance}:\n"
+        #body += f"        Free storage - {free_storage_space_gb} GB\n"
+        #body += f"        Cpu utilization - {cpu_utilization} %\n"
+        #body += f"        Free memory - {free_memory_mb} MB\n\n"
+    
+
+    body += f"➡  The RDS Status\n {line_break_4} \n"
+    for instance in RDS_INSTANCES:
+        status = get_rds_status(instance)
+        body += f"       • {instance} - {status}\n"
+        
+
+    #########send_sns_message(subject, body)
+    
+    
+    
+    
+    #body1 = '\n\n ---------------------------------------------------------------------------------\n'
+    body1=""
+    body1 += f"\n\n ➡  The EKS nodegroups status. \n{line_break_3} \n"
+
+
+    paginator_list_clusters = client_eks.get_paginator('list_clusters')
+    paginator_list_nodegroups = client_eks.get_paginator('list_nodegroups')
+    #paginator_describe_db_instances = client_rds.get_paginator('describe_db_instances')
+
+    cluster_list = []
+    response_list_clusters = paginator_list_clusters.paginate()
+    for cluster_page in response_list_clusters:
+        cluster_list.extend(cluster_page['clusters'])
+    for clus in cluster_list:
+        response_list_nodegroups = paginator_list_nodegroups.paginate(clusterName= clus)
+           
+        # body += '{} :\n\n'.format(clus)
+        for ng_page in response_list_nodegroups:
+            for ng in ng_page['nodegroups']:
+                response_describe_nodegroup = client_eks.describe_nodegroup(
+                        clusterName=clus,
+                        nodegroupName=ng
+                    )
+                if 'scalingConfig' in response_describe_nodegroup['nodegroup']:
+                    if 'desiredSize' in response_describe_nodegroup['nodegroup']['scalingConfig']:
+                        body1 += '• Nodegroup       : {}              Size : {}\n'.format(ng, str(response_describe_nodegroup['nodegroup']['scalingConfig']['desiredSize']))
+
+    
+    mainbody=body+body1+"\n\n -------------------------------The end of Report------------------------------- ."
+    
+    print(mainbody)
+    
+    
+
+    send_sns_message(subject, mainbody)                
+    
+ 
+# Test the function
+if __name__ == "__main__":
+    #lambda_handler(None, None)
+    lambda_handler(None, None)
