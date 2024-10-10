@@ -1,0 +1,605 @@
+import boto3
+import pprint
+
+client_trail = boto3.client('cloudtrail')
+client_sns = boto3.client('sns')
+client_s3 = boto3.client('s3')
+client_logs = boto3.client('logs')
+client_cloudWatch = boto3.client('cloudwatch')
+
+log_group_name = 'aws-cloudtrail-logs-test'
+topic_arn = 'arn:aws:sns:eu-west-1:1234567890:aws-controltower-SecurityNotifications'
+metric_namespace = 'cis-cloudwatch-metrics'
+
+'''
+
+response_topic = client_sns.create_topic(
+    Name='aws-controltower-SecurityNotifications',
+    Tags=[
+        {
+            'Key': 'Description',
+            'Value': 'Topic to receive all CIS alarms'
+        },
+    ]
+)
+
+topic_arn = response_topic['TopicArn']
+
+response_subscriber = client_sns.subscribe(
+    TopicArn=response_topic['TopicArn'],
+    Protocol='email',
+    Endpoint='suman@test.com',
+    ReturnSubscriptionArn=True
+)
+
+response_bucket = client_s3.create_bucket(
+    ACL='private',
+    Bucket='bucket_cloudtrail_logs',
+    CreateBucketConfiguration={
+        'LocationConstraint': 'eu-west-1'
+    },
+    GrantFullControl='string',
+    GrantRead='string',
+    GrantReadACP='string',
+    GrantWrite='string',
+    GrantWriteACP='string',
+    ObjectOwnership='BucketOwnerPreferred'|'ObjectWriter'|'BucketOwnerEnforced'
+)
+
+log_group_name = 'CIS-alarms-log-group'
+log_grp_arn = ''
+nextToken = ' '
+log_groups = []
+while nextToken != 'f':
+    response_logGroups = client_logs.describe_log_groups(
+    nextToken=nextToken
+    )
+    for i in response_logGroups['logGroups']:
+        log_groups.append(i['logGroupName'])
+    if 'nextToken' in response_logGroups:
+        nextToken = response_logGroups['nextToken']
+    else:
+        nextToken = 'f'    
+
+if log_group_name not in log_groups:
+    response_loggrp = client_logs.create_log_group(
+        logGroupName= log_group_name,
+        tags={
+            'Description': 'For all CIS alarms'
+        }
+    )
+
+response_loggrparn = client_logs.describe_log_groups(
+    logGroupNamePrefix= log_group_name
+)
+log_grp_arn = response_loggrparn['logGroups'][0]['arn']
+
+trail_list = []
+trail_to_create = 'CIS-alarms-trail'
+response_trailsList = client_trail.describe_trails()
+for j in response_trailsList['trailList']:
+    trail_list.append(j['Name'])
+
+if trail_to_create not in trail_list:
+    response_trail = client_trail.create_trail(
+        Name= trail_to_create,
+        S3BucketName='aws-cloudtrail-logs-1234567890',
+        IsMultiRegionTrail=True,
+        EnableLogFileValidation=True,
+        CloudWatchLogsLogGroupArn=log_grp_arn,
+        CloudWatchLogsRoleArn="arn:aws:iam::1234567890:role/service-role/CloudTrailRoleforCloudWatch",
+        TagsList=[
+            {
+                'Key': 'Description',
+                'Value': 'For CIS alarms'
+            },
+        ]
+    )
+'''
+def root_user_usage():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='Root-account-usage',
+        filterPattern='{$.userIdentity.type="Root" && $.userIdentity.invokedBy NOT EXISTS && $.eventType !="AwsServiceEvent"}',
+        metricTransformations=[
+            {
+                'metricName': 'RootAccountUsageCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='root-account-usage',
+        AlarmDescription='Monitor root account usage',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='RootAccountUsageCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for root account usage successfully got created\n\n'
+    return response
+
+def iam_policy_changes():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='iam-policy-changes',
+        filterPattern='{($.eventName=DeleteGroupPolicy) || ($.eventName=DeleteRolePolicy) || ($.eventName=DeleteUserPolicy) || ($.eventName=PutGroupPolicy) || ($.eventName=PutRolePolicy) || ($.eventName=PutUserPolicy) || ($.eventName=CreatePolicy) || ($.eventName=DeletePolicy) || ($.eventName=CreatePolicyVersion) || ($.eventName=DeletePolicyVersion) || ($.eventName=AttachRolePolicy) || ($.eventName=DetachRolePolicy) || ($.eventName=AttachUserPolicy) || ($.eventName=DetachUserPolicy) || ($.eventName=AttachGroupPolicy) || ($.eventName=DetachGroupPolicy)}',
+        metricTransformations=[
+            {
+                'metricName': 'IamPolicyChangeCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+    response += 'Metric filter for iam policy change successfully got created\n\n'
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='iam-policy-changes',
+        AlarmDescription='Monitor IAM policy changes',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='IamPolicyChangeCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for iam policy change successfully got created\n\n'
+    return response
+
+def cloudTrail_configuration_changes():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='cloudtrail-config-change',
+        filterPattern='{($.eventName=CreateTrail) || ($.eventName=UpdateTrail) || ($.eventName=DeleteTrail) || ($.eventName=StartLogging) || ($.eventName=StopLogging)}',
+        metricTransformations=[
+            {
+                'metricName': 'CloudTrailConfigChangeCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+    response += 'Metric filter for cloudTrail configuration changes successfully got created\n\n'
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='cloudtrail-config-change',
+        AlarmDescription='Monitor CloudTrail configuration changes',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='CloudTrailConfigChangeCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for cloudTrail configuration changes successfully got created\n\n'
+    return response
+
+def console_authentication_failures():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='failed-console-login',
+        filterPattern='{($.eventName=ConsoleLogin) && ($.errorMessage="Failed authentication")}',
+        metricTransformations=[
+            {
+                'metricName': 'FailedConsoleLoginCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='failed-console-login',
+        AlarmDescription='Monitor failed console logins',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='FailedConsoleLoginCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for failed console login successfully got created\n\n'
+    return response
+
+def disable_or_delete_cmk():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='disable-or-delete-cmk',
+        filterPattern='{($.eventSource=kms.amazonaws.com) && (($.eventName=DisableKey) || ($.eventName=ScheduleKeyDeletion))}',
+        metricTransformations=[
+            {
+                'metricName': 'DisableOrDeleteCmkCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='disable-or-delete-cmk',
+        AlarmDescription='Monitor disabled or deleted KMS keys',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='DisableOrDeleteCmkCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for disable or delete cmk count successfully got created\n\n'
+    return response
+
+def S3_bucket_policy_changes():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='s3-bucket-policy-change',
+        filterPattern='{($.eventSource=s3.amazonaws.com) && (($.eventName=PutBucketAcl) || ($.eventName=PutBucketPolicy) || ($.eventName=PutBucketCors) || ($.eventName=PutBucketLifecycle) || ($.eventName=PutBucketReplication) || ($.eventName=DeleteBucketPolicy) || ($.eventName=DeleteBucketCors) || ($.eventName=DeleteBucketLifecycle) || ($.eventName=DeleteBucketReplication))}',
+        metricTransformations=[
+            {
+                'metricName': 'S3BucketPolicyChangeCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='s3-bucket-policy-change',
+        AlarmDescription='Monitor s3 bucket policy changes',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='S3BucketPolicyChangeCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for s3 bucket policy change count successfully got created\n\n'
+    return response
+
+def AWS_Config_changes():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='aws-config-change',
+        filterPattern='{($.eventSource=config.amazonaws.com) && (($.eventName=StopConfigurationRecorder) || ($.eventName=DeleteDeliveryChannel) || ($.eventName=PutDeliveryChannel) || ($.eventName=PutConfigurationRecorder))}',
+        metricTransformations=[
+            {
+                'metricName': 'AwsConfigChangeCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='aws-config-change',
+        AlarmDescription='Monitor for AWS Config changes',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='AwsConfigChangeCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for aws config change successfully got created\n\n'
+    return response
+
+def security_group_changes():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='security-group-change',
+        filterPattern='{($.eventName=AuthorizeSecurityGroupIngress) || ($.eventName=AuthorizeSecurityGroupEgress) || ($.eventName=RevokeSecurityGroupIngress) || ($.eventName=RevokeSecurityGroupEgress) || ($.eventName=CreateSecurityGroup) || ($.eventName=DeleteSecurityGroup)}',
+        metricTransformations=[
+            {
+                'metricName': 'SecurityGroupChangeCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='security-group-change',
+        AlarmDescription='Monitor for security group changes',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='SecurityGroupChangeCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for sg change successfully got created\n\n'
+    return response
+
+
+def NACL_change():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='nacl-change',
+        filterPattern='{($.eventName=CreateNetworkAcl) || ($.eventName=CreateNetworkAclEntry) || ($.eventName=DeleteNetworkAcl) || ($.eventName=DeleteNetworkAclEntry) || ($.eventName=ReplaceNetworkAclEntry) || ($.eventName=ReplaceNetworkAclAssociation)}',
+        metricTransformations=[
+            {
+                'metricName': 'NaclChangeCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='nacl-change',
+        AlarmDescription='Monitor for NACL changes',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='NaclChangeCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for nacl change count successfully got created\n\n'
+    return response
+
+def network_gateways_change():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='network-gateway-change',
+        filterPattern='{($.eventName=CreateCustomerGateway) || ($.eventName=DeleteCustomerGateway) || ($.eventName=AttachInternetGateway) || ($.eventName=CreateInternetGateway) || ($.eventName=DeleteInternetGateway) || ($.eventName=DetachInternetGateway)}',
+        metricTransformations=[
+            {
+                'metricName': 'NetworkGatewayChangeCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='network-gateway-change',
+        AlarmDescription='Monitor for network gateway changes',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='NetworkGatewayChangeCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for network gateway change successfully got created\n\n'
+    return response
+
+def route_table_changes():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='route-table-change',
+        filterPattern='{($.eventName=CreateRoute) || ($.eventName=CreateRouteTable) || ($.eventName=ReplaceRoute) || ($.eventName=ReplaceRouteTableAssociation) || ($.eventName=DeleteRouteTable) || ($.eventName=DeleteRoute) || ($.eventName=DisassociateRouteTable)}',
+        metricTransformations=[
+            {
+                'metricName': 'RouteTableChangeCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='route-table-change',
+        AlarmDescription='Monitor for route table changes',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='RouteTableChangeCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for route table change count successfully got created\n\n'
+    return response
+
+def VPC_changes():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='vpc-change',
+        filterPattern='{($.eventName=CreateVpc) || ($.eventName=DeleteVpc) || ($.eventName=ModifyVpcAttribute) || ($.eventName=AcceptVpcPeeringConnection) || ($.eventName=CreateVpcPeeringConnection) || ($.eventName=DeleteVpcPeeringConnection) || ($.eventName=RejectVpcPeeringConnection) || ($.eventName=AttachClassicLinkVpc) || ($.eventName=DetachClassicLinkVpc) || ($.eventName=DisableVpcClassicLink) || ($.eventName=EnableVpcClassicLink)}',
+        metricTransformations=[
+            {
+                'metricName': 'VpcChangeCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='vpc-change',
+        AlarmDescription='Monitor for VPC config changes',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='VpcChangeCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for vpc change count successfully got created\n\n'
+    return response
+
+def unauthorized_API_calls():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='unauthorized-cloudtrail-calls',
+        filterPattern='{($.errorCode="*UnauthorizedOperation") || ($.errorCode="AccessDenied*")}',
+        metricTransformations=[
+            {
+                'metricName': 'UnauthorizedCloudtrailCallCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='unauthorized-cloudtrail-calls',
+        AlarmDescription='Monitor unauthorized API calls through cloudtrail',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='UnauthorizedCloudtrailCallCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for UnauthorizedCloudtrailCallCount successfully got created\n\n'
+    return response
+
+def console_signin_without_mfa():
+    response = ''
+    response_metric = client_logs.put_metric_filter(
+        logGroupName=log_group_name,
+        filterName='console-access-without-mfa',
+        filterPattern='{ ($.eventName = "ConsoleLogin") && ($.additionalEventData.MFAUsed != "Yes") && ($.userIdentity.type = "IAMUser") && ($.responseElements.ConsoleLogin = "Success") }',
+        metricTransformations=[
+            {
+                'metricName': 'ConsoleAccessWithoutMfaCount',
+                'metricNamespace':   metric_namespace,
+                'metricValue': '1',
+                'unit': 'None',
+            },
+        ]
+    )
+
+    response_alarm = client_cloudWatch.put_metric_alarm(
+        AlarmName='console-access-without-mfa',
+        AlarmDescription='Monitor console logins without mfa',
+        AlarmActions=[
+            topic_arn
+        ],
+        MetricName='ConsoleAccessWithoutMfaCount',
+        Namespace=  metric_namespace,
+        Statistic='Sum',
+        EvaluationPeriods=1,
+        TreatMissingData= "notBreaching",
+        DatapointsToAlarm = 1,
+        Period=300,
+        Threshold=1.0,
+        ComparisonOperator='GreaterThanOrEqualToThreshold'
+    )
+    response += 'Metric alarm for monitoring console logins without mfa successfully got created\n\n'
+    return response
+
+print(root_user_usage())
+print(iam_policy_changes())
+print(cloudTrail_configuration_changes())
+print(console_authentication_failures())
+print(disable_or_delete_cmk())
+print(S3_bucket_policy_changes())
+print(AWS_Config_changes())
+print(security_group_changes())
+print(NACL_change())
+print(network_gateways_change())
+print(route_table_changes())
+print(VPC_changes())
+print(unauthorized_API_calls())
+print(console_signin_without_mfa())
